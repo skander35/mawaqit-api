@@ -95,6 +95,17 @@ def get_next_prayer_times_of_the_day(masjid_id):
     return {name: value if value > current_time else tomorrow[name] for name, value in today.items()}
 
 
+def _next_prayer(name, day, times):
+    moment = datetime.combine(day, datetime.strptime(times[name], "%H:%M").time(), TIMEZONE)
+    return models.NextPrayer(
+        name=name,
+        time=times[name],
+        date=day.isoformat(),
+        timestamp=int(moment.timestamp()),
+        sunrise=times["sunrise"] if name == "fajr" else None,
+    )
+
+
 def get_next_prayer(masjid_id):
     now = _now()
     confData = fetch_mawaqit(masjid_id)
@@ -102,9 +113,9 @@ def get_next_prayer(masjid_id):
     current_time = now.strftime("%H:%M")
     for name in PRAYERS:
         if today[name] > current_time:
-            return models.NextPrayer(name=name, time=today[name], date=now.date().isoformat())
+            return _next_prayer(name, now.date(), today)
     tomorrow = now.date() + timedelta(days=1)
-    return models.NextPrayer(name="fajr", time=_calendar_times(confData, tomorrow).fajr, date=tomorrow.isoformat())
+    return _next_prayer("fajr", tomorrow, _calendar_times(confData, tomorrow).model_dump())
 
 
 def get_calendar(masjid_id):

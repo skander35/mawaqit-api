@@ -14,6 +14,8 @@ class NextPrayer(BaseModel):
     name: str
     time: str
     date: str
+    timestamp: int
+    sunrise: Optional[str] = None
 
 class IqamaPrayerTimes(BaseModel):
     fajr: str

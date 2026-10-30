@@ -9,7 +9,7 @@ from config.settings import settings
 from scraping import script
 
 PARIS = ZoneInfo("Europe/Paris")
-# Jeudi 30 octobre 2026, 19:30 a Paris (18:30 UTC)
+# Vendredi 30 octobre 2026, 19:30 a Paris (18:30 UTC)
 FROZEN_NOW = datetime(2026, 10, 30, 19, 30, tzinfo=PARIS)
 TODAY = ["06:01", "07:02", "13:03", "16:04", "18:05", "19:40"]
 

@@ -151,17 +151,37 @@ def test_next_prayer_is_today_when_one_remains(site):
         "name": "icha",
         "time": "19:40",
         "date": "2026-10-30",
+        "timestamp": int(FROZEN_NOW.replace(minute=40).timestamp()),
+        "sunrise": None,
     }
 
 
-def test_next_prayer_after_icha_is_tomorrow_fajr(site, monkeypatch):
+def test_next_prayer_after_icha_is_tomorrow_fajr_with_tomorrow_sunrise(site, monkeypatch):
     _at(monkeypatch, FROZEN_NOW.replace(hour=22))
 
     assert script.get_next_prayer(SLUG).model_dump() == {
         "name": "fajr",
         "time": "05:00",
         "date": "2026-10-31",
+        "timestamp": int(datetime(2026, 10, 31, 5, 0, tzinfo=FROZEN_NOW.tzinfo).timestamp()),
+        "sunrise": "06:00",
     }
+
+
+def test_next_prayer_fajr_of_today_has_today_sunrise(site, monkeypatch):
+    _at(monkeypatch, FROZEN_NOW.replace(hour=4))
+
+    prayer = script.get_next_prayer(SLUG)
+
+    assert (prayer.name, prayer.time, prayer.sunrise) == ("fajr", "06:01", "07:02")
+
+
+def test_next_prayer_timestamp_is_correct_across_clock_change(site, monkeypatch):
+    # Passage a l'heure d'hiver dans la nuit du 24 au 25 octobre 2026 : 7 h a la montre, 8 h reelles
+    moment = datetime(2026, 10, 24, 22, 0, tzinfo=FROZEN_NOW.tzinfo)
+    _at(monkeypatch, moment)
+
+    assert script.get_next_prayer(SLUG).timestamp - moment.timestamp() == 8 * 3600
 
 
 def test_next_prayer_skips_sunrise(site, monkeypatch):
