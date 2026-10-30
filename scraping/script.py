@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 import json
 import re
+import time
 import models.models as models
 from scraping import cache
 
@@ -16,6 +17,8 @@ SLUG_PATTERN = re.compile(r'[A-Za-z0-9_-]+')
 CONF_DATA_PATTERN = re.compile(r'(?:var|let|const)\s+confData\s*=\s*')
 FETCHED_ON = "_fetchedOn"
 PRAYERS = ("fajr", "dohr", "asr", "maghreb", "icha")
+RETRY_DELAY_SECONDS = 1800
+_failed_at = {}
 
 
 def _now():
@@ -57,13 +60,23 @@ def fetch_mawaqit(masjid_id:str):
     if cached and cached.get(FETCHED_ON) == today:
         return cached
 
+    # Sans ce delai, une panne de mawaqit.net serait retentee a chaque requete
+    failed_at = _failed_at.get(masjid_id)
+    if failed_at is not None and time.monotonic() - failed_at < RETRY_DELAY_SECONDS:
+        if cached:
+            return cached
+        raise HTTPException(status_code=502, detail=f"mawaqit.net unavailable for {masjid_id}, retry later")
+
     try:
         conf_data = {**_download(masjid_id), FETCHED_ON: today}
     except HTTPException as error:
+        if error.status_code != 404:
+            _failed_at[masjid_id] = time.monotonic()
         if cached and error.status_code != 404:
             print(f"Serving cached data for {masjid_id}: {error.detail}")
             return cached
         raise
+    _failed_at.pop(masjid_id, None)
     cache.write(masjid_id, conf_data)
     return conf_data
 

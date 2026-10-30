@@ -74,4 +74,5 @@ def site(monkeypatch, tmp_path):
     monkeypatch.setattr(requests, "get", fake.get)
     monkeypatch.setattr(settings, "CACHE_DIR", str(tmp_path), raising=False)
     monkeypatch.setattr(script, "_now", lambda: FROZEN_NOW)
+    monkeypatch.setattr(script, "_failed_at", {})
     return fake

@@ -107,6 +107,42 @@ def test_times_of_the_day_are_never_those_of_a_previous_day(site, monkeypatch):
     assert times["fajr"] == "05:00"
 
 
+def test_failed_refresh_is_not_retried_at_every_request(site, monkeypatch):
+    script.fetch_mawaqit(SLUG)
+    _at(monkeypatch, FROZEN_NOW + timedelta(days=1))
+    site.error = requests.ConnectionError()
+
+    script.fetch_mawaqit(SLUG)
+    script.fetch_mawaqit(SLUG)
+
+    assert len(site.calls) == 2
+
+
+def test_failed_fetch_without_cache_is_not_retried_at_every_request(site):
+    site.error = requests.ConnectionError()
+
+    for _ in range(2):
+        with pytest.raises(HTTPException) as error:
+            script.fetch_mawaqit(SLUG)
+        assert error.value.status_code == 502
+
+    assert len(site.calls) == 1
+
+
+def test_refresh_is_retried_after_the_delay(site, monkeypatch):
+    script.fetch_mawaqit(SLUG)
+    _at(monkeypatch, FROZEN_NOW + timedelta(days=1))
+    site.error = requests.ConnectionError()
+    script.fetch_mawaqit(SLUG)
+    site.error = None
+    clock = script.time.monotonic() + script.RETRY_DELAY_SECONDS + 1
+    monkeypatch.setattr(script.time, "monotonic", lambda: clock)
+
+    script.fetch_mawaqit(SLUG)
+
+    assert len(site.calls) == 3
+
+
 def test_mosque_removed_from_site_is_not_served_from_cache(site, monkeypatch):
     script.fetch_mawaqit(SLUG)
     _at(monkeypatch, FROZEN_NOW + timedelta(days=1))
