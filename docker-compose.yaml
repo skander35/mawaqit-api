@@ -1,14 +1,15 @@
-version: "3"
-
 services:
   mawaqit-api:
-    image: mrsofiane/mawaqit-api:latest
+    build: .
+    restart: unless-stopped
     ports:
-      - "80:80"
-    depends_on:
-      - mawaqit-api-redis
+      - "127.0.0.1:8090:80"
     env_file:
       - .env
+    environment:
+      - TIMEZONE=Europe/Paris
+    volumes:
+      - mawaqit-cache:/app/cache
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/api/v1/ || exit 1"]
       interval: 30s
@@ -16,7 +17,5 @@ services:
       retries: 3
       start_period: 20s
 
-  mawaqit-api-redis:
-    image: redis:alpine3.18
-    ports:
-      - "6379:6379"
+volumes:
+  mawaqit-cache:

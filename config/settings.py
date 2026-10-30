@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     ENABLE_REDIS: bool = False
     REDIS_URI: str = "redis://localhost:6379"
 
+    # Scraping
+    TIMEZONE: str = "Europe/Paris"
+    REQUEST_TIMEOUT: int = 10
+    CACHE_DIR: str = "cache"
+
     # Authentication
     ENABLE_AUTH: bool = False
     BEARER_TOKEN: Optional[str] = None

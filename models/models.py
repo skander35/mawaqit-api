@@ -10,6 +10,11 @@ class PrayerTimes(BaseModel):
     maghreb: str
     icha: str
 
+class NextPrayer(BaseModel):
+    name: str
+    time: str
+    date: str
+
 class IqamaPrayerTimes(BaseModel):
     fajr: str
     dohr: str

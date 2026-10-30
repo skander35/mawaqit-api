@@ -1,94 +1,111 @@
 import requests
 from bs4 import BeautifulSoup
 from fastapi import HTTPException
-from config.redisClient import redisClient
-from redis.exceptions import RedisError
+from config.settings import settings
 from typing import List
-import datetime
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import json
 import re
 import models.models as models
+from scraping import cache
+
+TIMEZONE = ZoneInfo(settings.TIMEZONE)
+SLUG_PATTERN = re.compile(r'[A-Za-z0-9_-]+')
+CONF_DATA_PATTERN = re.compile(r'(?:var|let|const)\s+confData\s*=\s*')
+FETCHED_ON = "_fetchedOn"
+PRAYERS = ("fajr", "dohr", "asr", "maghreb", "icha")
+
+
+def _now():
+    return datetime.now(TIMEZONE)
+
+
+def _parse_conf_data(html, masjid_id):
+    soup = BeautifulSoup(html, 'html.parser')
+    script = soup.find('script', string=CONF_DATA_PATTERN)
+    if not script:
+        raise HTTPException(status_code=502, detail=f"Script containing confData not found for {masjid_id}")
+    start = CONF_DATA_PATTERN.search(script.string).end()
+    try:
+        conf_data, _ = json.JSONDecoder().raw_decode(script.string, start)
+    except ValueError:
+        raise HTTPException(status_code=502, detail=f"Failed to extract confData JSON for {masjid_id}")
+    return conf_data
+
+
+def _download(masjid_id):
+    url = f"https://mawaqit.net/fr/{masjid_id}"
+    try:
+        r = requests.get(url, timeout=settings.REQUEST_TIMEOUT)
+    except requests.RequestException:
+        raise HTTPException(status_code=502, detail=f"something went wrong fetching {url}")
+    if r.status_code == 404:
+        raise HTTPException(status_code=404, detail=f"{masjid_id} not found")
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"something went wrong fetching {url}")
+    return _parse_conf_data(r.text, masjid_id)
 
 
 def fetch_mawaqit(masjid_id:str):
-    WEEK_IN_SECONDS = 604800
-    retrieved_data = None
+    if not SLUG_PATTERN.fullmatch(masjid_id):
+        raise HTTPException(status_code=400, detail="Invalid masjid id")
 
-    # Check if Redis client is initialized
-    if redisClient is not None:
-        try:
-            retrieved_data = redisClient.get(masjid_id)
-        except RedisError:
-            print("Error when reading from cache")
+    today = _now().date().isoformat()
+    cached = cache.read(masjid_id)
+    if cached and cached.get(FETCHED_ON) == today:
+        return cached
 
-        if retrieved_data:
-            return json.loads(retrieved_data)
+    try:
+        conf_data = {**_download(masjid_id), FETCHED_ON: today}
+    except HTTPException as error:
+        if cached and error.status_code != 404:
+            print(f"Serving cached data for {masjid_id}: {error.detail}")
+            return cached
+        raise
+    cache.write(masjid_id, conf_data)
+    return conf_data
 
-    url = f"https://mawaqit.net/fr/{masjid_id}"
-    r = requests.get(url)
-    if r.status_code == 200:
-        soup = BeautifulSoup(r.text, 'html.parser')
-        searchString = r'(?:var|let)\s+confData\s*=\s*(.*?);'
-        script = soup.find('script', string=re.compile(searchString, re.DOTALL))
-        if script:
-            mawaqit = re.search(searchString, script.string, re.DOTALL)
-            if mawaqit:
-                conf_data_json = mawaqit.group(1)
-                conf_data = json.loads(conf_data_json)
-                # Store data in Redis if client is initialized
-                if redisClient is not None:
-                    redisClient.set(masjid_id, json.dumps(conf_data), ex=WEEK_IN_SECONDS)
-                return conf_data
-            else:
-                raise HTTPException(status_code=500, detail=f"Failed to extract confData JSON for {masjid_id}")
-        else:
-            print("Script containing confData not found.")
-            raise HTTPException(status_code=500, detail=f"Script containing confData not found for {masjid_id}")
-    if r.status_code == 404:
-        raise HTTPException(status_code=404, detail=f"{masjid_id} not found")  
-    if r.status_code == 500:
-        raise HTTPException(status_code=502, detail=f"something went wrong fetching {url}") 
+
+def _calendar_times(confData, day):
+    times = confData["calendar"][day.month - 1][str(day.day)]
+    return models.PrayerTimes(fajr=times[0], sunrise=times[1], dohr=times[2], asr=times[3], maghreb=times[4], icha=times[5])
+
+
+def _times_of_the_day(confData):
+    # `times` ne vaut que pour le jour du scraping : hors de ce jour, seul le calendrier est fiable
+    today = _now().date()
+    if confData.get(FETCHED_ON) != today.isoformat():
+        return _calendar_times(confData, today)
+    times = confData["times"]
+    return models.PrayerTimes(fajr=times[0], sunrise=confData["shuruq"], dohr=times[1], asr=times[2], maghreb=times[3], icha=times[4])
+
 
 def get_prayer_times_of_the_day(masjid_id):
-    confData = fetch_mawaqit(masjid_id)
-    times = confData["times"]
-    sunrise = confData["shuruq"]
-    prayer_time = models.PrayerTimes(fajr=times[0], sunrise=sunrise, dohr=times[1], asr=times[2], maghreb=times[3], icha=times[4])
-    prayer_dict = prayer_time.model_dump()
-    return prayer_dict
+    return _times_of_the_day(fetch_mawaqit(masjid_id)).model_dump()
 
-def get_next_day_prayers(confData):
-    next_month = int((datetime.today() + timedelta(+1)).strftime('%m')) - 1
-    next_day = (datetime.today() + timedelta(+1)).strftime('%-d')
-    calendar = confData["calendar"]
-    monthly_times = calendar[next_month]
-    next_day_times = monthly_times[next_day]
-    return models.PrayerTimes(
-        fajr=next_day_times[0],
-        sunrise=next_day_times[1],
-        dohr=next_day_times[2],
-        asr=next_day_times[3],
-        maghreb=next_day_times[4],
-        icha=next_day_times[5],
-    )
 
 def get_next_prayer_times_of_the_day(masjid_id):
-    now = datetime.now().strftime("%H:%M")
+    now = _now()
     confData = fetch_mawaqit(masjid_id)
-    times = confData["times"]
-    next_day_prayer_time = get_next_day_prayers(confData)
-    next_day_prayer_time = dict(next_day_prayer_time)
-    sunrise = confData["shuruq"]
-    prayer_time = models.PrayerTimes(fajr=times[0], sunrise=sunrise, dohr=times[1], asr=times[2], maghreb=times[3], icha=times[4])
-    prayer_time = dict(prayer_time)
-    for n, value in prayer_time.items():
-        if value < now:
-            prayer_time[n] = next_day_prayer_time[n]
-        else: value
-    #prayer_dict = prayer_time.model_dump()
-    return prayer_time
+    today = _times_of_the_day(confData).model_dump()
+    tomorrow = _calendar_times(confData, now.date() + timedelta(days=1)).model_dump()
+    current_time = now.strftime("%H:%M")
+    return {name: value if value > current_time else tomorrow[name] for name, value in today.items()}
+
+
+def get_next_prayer(masjid_id):
+    now = _now()
+    confData = fetch_mawaqit(masjid_id)
+    today = _times_of_the_day(confData).model_dump()
+    current_time = now.strftime("%H:%M")
+    for name in PRAYERS:
+        if today[name] > current_time:
+            return models.NextPrayer(name=name, time=today[name], date=now.date().isoformat())
+    tomorrow = now.date() + timedelta(days=1)
+    return models.NextPrayer(name="fajr", time=_calendar_times(confData, tomorrow).fajr, date=tomorrow.isoformat())
+
 
 def get_calendar(masjid_id):
     confData = fetch_mawaqit(masjid_id)

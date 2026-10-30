@@ -39,6 +39,11 @@ def get_next_prayer_times(masjid_id: str, _: str = Depends(verify_token)):
     return prayer_times
 
 
+@router.get("/{masjid_id}/next-prayer", status_code=200, summary="Get the single next prayer with its date", response_model=models.NextPrayer)
+def get_next_prayer(masjid_id: str, _: str = Depends(verify_token)):
+    return script.get_next_prayer(masjid_id)
+
+
 @router.get("/{masjid_id}/calendar", status_code=200, summary="get the year calendar of the prayer times")
 def get_year_calendar(masjid_id: str, _: str = Depends(verify_token)):
     r = script.get_calendar(masjid_id)

@@ -19,3 +19,8 @@ Find the installation and usage documentation [here](https://mrsofiane.me/mawaqi
 ## License
 
 [MIT](https://github.com/mrsofiane/mawaqit-api/blob/main/LICENSE.md)
+
+## Fork notes
+
+This fork adds a daily file cache, `TIMEZONE` handling, stale-cache fallback and `GET /api/v1/{masjid_id}/next-prayer`.
+`docker compose up -d --build` serves the API on `127.0.0.1:8090` without Redis. Copy `.env.example` to `.env` first.
